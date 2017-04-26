@@ -4,8 +4,8 @@ from scyframework.ordering import Node, Graph
 
 
 def test_node():
-    node1, node2, node3, node4 = nodes = [Node(name=str(i+1))
-                                          for i in range(4)]
+    node1, node2, node3, node4 = [Node(name=str(i+1))
+                                  for i in range(4)]
     node1.link_parent(node2)
     node2.link_parent(node3)
     node3.link_parent(node4)
@@ -41,8 +41,8 @@ def test_graph_orientation():
     good_order1 = [node2, node3, node1, node4]
     good_order2 = [node2, node1, node3, node4]
 
-    result = all([ordering[i] == good_order1[i] for i in range(4)]) or \
-             all([ordering[i] == good_order2[i] for i in range(4)])
+    result = (all([ordering[i] == good_order1[i] for i in range(4)]) or
+              all([ordering[i] == good_order2[i] for i in range(4)]))
 
     if not result:
         print(ordering)
