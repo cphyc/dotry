@@ -4,9 +4,11 @@ import re
 import networkx as nx
 import time
 import os
+from functools import wraps
+
 
 class Task:
-    '''Reprenset a task'''
+    '''Represent a task'''
     def __init__(self, name, desc, provides, requires):
         self.name = name
         self.desc = desc
@@ -77,30 +79,59 @@ class Data:
         return self.desc
 
 
-DIN_RE = re.compile('\.din\([\'"](\w+)[\'"]\)')
-DOUT_RE = re.compile('\.dout\([\'"](\w+)[\'"]\)')
+DOUT_RE = '%s\.dout\([\'"]{1,3}([^\'"]+)[\'"]{1,3}\)'
+DIN_RE = '%s\.din\([\'"]{1,3}([^\'"]+)[\'"]{1,3}\)'
+
+
+class NotRegisteredError(Exception):
+    pass
 
 
 class TaskManager:
     '''A class to handle dependencies between python functions.'''
+
     def __init__(self, data_dir='./data'):
         self.tasks = dict()
         self.graph = nx.DiGraph()
-        self.str_to_data = dict()
-        self.data_to_provider = dict()
+        self._data_to_task = dict()
+        self._path_to_data = dict()
         self.data_dir = os.path.join(os.getcwd(), data_dir)
         if not os.path.isdir(self.data_dir):
             os.mkdir(self.data_dir)
 
     def get_or_register_data(self, raw_datafile):
-        '''Get or create the Data object for a given file'''
-        datafile = self._get_data_path(raw_datafile)
-        if datafile in self.str_to_data:
-            return self.str_to_data[datafile]
-        else:
+        '''Get or create the Data object for a given filename'''
+        try:
+            return self.get_data_by_path(raw_datafile)
+        except NotRegisteredError:
+            datafile = os.path.join(self.data_dir, raw_datafile)
             data_obj = Data(datafile)
-            self.str_to_data[datafile] = data_obj
+            self.set_data_by_path(raw_datafile, data_obj)
             return data_obj
+
+    def get_task_by_data(self, data_obj):
+        if not isinstance(data_obj, Data):
+            raise TypeError('«%s» is not of type Data' % data_obj)
+
+        if data_obj in self._data_to_task:
+            return self._data_to_task[data_obj]
+        else:
+            raise NotRegisteredError('«%s» is not managed.' % data_obj)
+
+    def set_task_by_data(self, data_obj, task_obj):
+        self._data_to_task[data_obj] = task_obj
+
+    def get_data_by_path(self, fname):
+        if fname in self._path_to_data:
+            return self._path_to_data[fname]
+        else:
+            raise NotRegisteredError('«%s» is not managed.' % fname)
+
+    def set_data_by_path(self, fname, data_obj):
+        if not isinstance(data_obj, Data):
+            raise TypeError('«%s» is not of type Data' % data_obj)
+
+        self._path_to_data[fname] = data_obj
 
     def register(self, fun):
         '''Register a function in the task manager. The task manager
@@ -127,13 +158,18 @@ class TaskManager:
         '''
         desc = inspect.getdoc(fun)
         src = inspect.getsource(fun)
+        first_line = inspect.getsourcelines(fun)[0][0]
         hsh = hashlib.sha256(src.encode('utf-8')).hexdigest()
         fun_name = fun.__name__
 
+        prefix = re.match('@(\w+)\.register', first_line).groups()[0]
+        print(prefix, src)
         data_in = [self.get_or_register_data(dt)
-                   for dt in re.findall(DIN_RE, src)]
+                   for dt in set(re.findall(DIN_RE % prefix, src))]
         data_out = [self.get_or_register_data(dt)
-                    for dt in re.findall(DOUT_RE, src)]
+                    for dt in set(re.findall(DOUT_RE % prefix, src))]
+
+        print(data_in, data_out)
 
         def set_task(task):
             task.hash = hsh
@@ -142,7 +178,7 @@ class TaskManager:
             task.fun = fun
             # Invalidate data provided
             for d in data_out:
-                self.data_to_provider[d] = task
+                self.set_task_by_data(d, task)
 
         if fun_name in self.graph:
             task = self.graph.node[fun_name]['task']
@@ -164,13 +200,12 @@ class TaskManager:
 
         # Add edges to parent tasks
         for din in data_in:
-            if din not in self.data_to_provider:
-                raise Exception('No provider found for «%s»' % din)
-            provider_task = self.data_to_provider[din]
+            provider_task = self.get_task_by_data(din)
 
             # print('Linking %s to %s' % (task.name, provider_task.name))
             self.graph.add_edge(provider_task.name, task.name)
 
+        @wraps(fun)
         def wrap(*args, **kwargs):
             ret = None
             # Build dep tree
@@ -193,18 +228,16 @@ class TaskManager:
 
     def din(self, fname):
         '''Use this function to access the full path of an input data file.'''
-        return self._get_data_path(fname)
+        return self.dany(fname)
 
     def dout(self, fname):
         '''Use this function to access the full path of an output data file.'''
-        return self._get_data_path(fname)
+        return self.dany(fname)
 
     def dany(self, fname):
         '''Use this function to access the full path of an any data file.'''
-        return self._get_data_path(fname)
-
-    def _get_data_path(self, fname):
-        return os.path.join(self.data_dir, fname)
+        data_obj = self.get_data_by_path(fname)
+        return data_obj.datafile
 
     def __repr__(self):
         arr = []
