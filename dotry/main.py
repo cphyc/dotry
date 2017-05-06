@@ -7,6 +7,8 @@ import os
 from functools import wraps
 import pkgutil
 import sys
+def dummyfun():
+    raise Exception('Not specified')
 
 
 class Task:
@@ -16,7 +18,9 @@ class Task:
         self.desc = desc
         self.provides = provides
         self.requires = requires
-        self.has_run = False
+        self.has_run = True
+        self.fun = dummyfun
+        self.original_fun = dummyfun
 
     def __repr__(self):
         status = 'R' if self.has_run else ' '
@@ -51,8 +55,8 @@ class Task:
         dont_need_run = self.has_run and self.outputs_up_to_date
         return not dont_need_run
 
-    def __call__(self):
-        ret = self.fun()
+    def __call__(self, *args, **kwargs):
+        ret = self.fun(*args, **kwargs)
         # Mark as runned and out file up to date
         # print('setting %s.has_run = True' % self)
         self.has_run = True
@@ -130,7 +134,7 @@ class TaskManager:
         if data_obj in self._data_to_dep:
             return self._data_to_dep[data_obj]
         else:
-            raise NotRegisteredError('«%s» is mot managed.' % data_obj)
+            return []
 
     def set_task_by_data(self, data_obj, task_obj):
         self._data_to_task[data_obj] = task_obj
@@ -213,7 +217,7 @@ class TaskManager:
             task.hash = hsh
             task.src = src
             task.desc = desc
-            task.fun = fun
+            task.original_fun = fun
             # Invalidate data provided
             for d in data_out:
                 self.set_task_by_data(d, task)
@@ -249,27 +253,41 @@ class TaskManager:
 
         @wraps(fun)
         def wrap(*args, **kwargs):
-            ret = None
-            # Build dep tree
-            g = nx.ego_graph(self.graph.reverse(), task.name, radius=100)
-            node_order = nx.topological_sort(g, reverse=True)
-            # print('order: ', node_order)
-            for node in node_order:
-                task_obj = self.graph.node[node]['task']
-                if task_obj.need_run or task_obj.name == task.name:
-                    if self.verbose:
-                        print('Calling «%s»' % task_obj)
+            self.execute(task, *args, **kwargs)
 
-                    # Execute the task
-                    ret = task_obj()
-
-                    # Mark the children to run them
-                    for child in self.graph.neighbors(node):
-                        self.graph.node[child]['task'].has_run = False
-
-            return ret
-
+        task.fun = wrap
         return wrap
+
+    def execute(self, tasks, *args, **kwargs):
+        ret = None
+
+        reversed_graph = self.graph.reverse()
+
+        if not isinstance(tasks, (tuple, list)):
+            tasks = [tasks]
+        g = nx.ego_graph(reversed_graph, tasks[0].name, radius=100)
+
+        for t in tasks[1:]:
+            g = nx.compose(g, nx.ego_graph(reversed_graph, t.name,
+                                           radius=100))
+
+        node_order = nx.topological_sort(g, reverse=True)
+        print(g, node_order)
+        # print('order: ', node_order)
+        for node in node_order:
+            task_obj = self.graph.node[node]['task']
+            if task_obj.need_run or task_obj.name in [t.name for t in tasks]:
+                if self.verbose:
+                    print('Calling «%s»' % task_obj)
+
+                # Execute the task
+                ret = task_obj.original_fun()
+
+                # Mark the children to run them
+                for child in self.graph.neighbors(node):
+                    self.graph.node[child]['task'].has_run = False
+
+        return ret
 
     def din(self, fname):
         '''Use this function to access the full path of an input data file.'''

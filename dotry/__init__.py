@@ -1,7 +1,5 @@
-from .main import Task, Data, TaskManager, auto_discover
+from .main import Task, Data, TaskManager, get_task_manager
 
-__all__ = [Task, Data, TaskManager, auto_discover]
+__all__ = [Task, Data, TaskManager, get_task_manager]
 
 
-if __name__ == '__main__':
-    tm = auto_discover()
