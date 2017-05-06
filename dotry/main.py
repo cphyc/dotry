@@ -5,8 +5,15 @@ import networkx as nx
 import time
 import os
 from functools import wraps
-import pkgutil
-import sys
+import matplotlib as mpl
+from .commands import list_tasks, list_files, generate, run, dependency
+import pickle
+
+
+mpl.use('agg')
+import matplotlib.pyplot as plt
+
+
 def dummyfun():
     raise Exception('Not specified')
 
@@ -313,64 +320,36 @@ class TaskManager:
                         else 'files not up to date'))
         return '\n'.join(arr)
 
-    def __getitem__(self, tname):
-        return [t for t in self.tasks if t.name in tname]
+    def __getitem__(self, tnames):
+        return [t for t in self.tasks if t.name in tnames]
 
-    def get_task_by_name(self, tname):
-        return [t for t in self.tasks if t.name in tname]
+    def get_task_by_name(self, tnames):
+        ret = [t for t in self.tasks if t.name in tnames]
+        if not len(tnames) == len(ret):
+            raise Exception("Could't find matching task for names", tnames)
 
-def auto_discover():
-    # tm = TaskManager(data_dir=os.path.join(cwd, 'data'))
-    from tests.test_1 import foo
-    return
+        return ret
+
+    def print_as_dot(self, fname):
+        g = self.graph.reverse()
+
+        layout = nx.spring_layout(g)
+        nx.draw(g, pos=layout)
+        nx.draw_networkx_labels(g, pos=layout)
+        plt.savefig(fname)
 
 
 tm = TaskManager()
 
 
-def list_tasks(args):
-    auto_discover()
-    print('#Tasks\tUp-to-date')
-    for task in tm.get_all_tasks():
-        status = 'yes' if task.outputs_up_to_date else 'no'
-        print('%s\t%s' % (task.name,
-                          status))
-
-
-def list_files(args):
-    auto_discover()
-    print('#File\tProvider\tRequired by')
-    for f, dobj in tm.get_all_data():
-        manager = tm.get_task_by_data(dobj)
-        dependencies = tm.get_dep_by_data(dobj)
-        print('%s\t%s\t%s' % (f, manager,
-                              ';'.join([str(_) for _ in dependencies])))
-
-
-def generate(args):
-    auto_discover()
-    dobjs = (tm.get_data_by_path(d) for d in args.files)
-
-    for dobj in dobjs:
-        task = tm.get_task_by_data(dobj)
-        if args.verbose:
-            print('Running %s' % task)
-        if task.need_run:
-            task()
-
-
-def run(args):
-    tm.verbose = args.verbose
-    auto_discover()
-    for task in tm.get_task_by_name(args.tasks):
-        if task.need_run:
-            task()
+def get_task_manager():
+    return tm
 
 
 def parse_args():
     import argparse
     parser = argparse.ArgumentParser(description='')
-    parser.set_defaults(cb=lambda e: parser.print_help())
+    parser.set_defaults(cb=lambda *args: parser.print_help())
     sp = parser.add_subparsers()
 
     list_files_parser = sp.add_parser('list-files',
@@ -393,9 +372,16 @@ def parse_args():
     run_parser.add_argument('-v', '--verbose', action='store_true')
     run_parser.set_defaults(cb=run)
 
-    args = parser.parse_args()
+    dep_parser = sp.add_parser('dependency', help='Print a dependency tree.')
+    dep_parser.add_argument('output',
+                            help='Destination of the graph representation.')
+    dep_parser.add_argument('-v', '--verbose', action='store_true')
+    dep_parser.set_defaults(cb=dependency)
 
-    args.cb(args)
+    return parser.parse_args()
+
 
 def main():
-    parse_args()
+    args = parse_args()
+
+    args.cb(args, tm)
