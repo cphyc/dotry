@@ -1,3 +1,9 @@
+# IMPORTANT
+
+This program is not stable enough for a daily use! Use at your own risk.
+Moreover the following guide may not be up-to-date.
+
+
 # Dotry
 
 Have you ever had to rerun a whole set of simulation because you couldn't remember if a given file was up to date with a function? Dotry stands for *Do*n't *Tr*ust *Y*ourself but your computer…
