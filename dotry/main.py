@@ -5,6 +5,8 @@ import networkx as nx
 import time
 import os
 from functools import wraps
+import pkgutil
+import sys
 
 
 class Task:
@@ -91,13 +93,16 @@ class TaskManager:
     '''A class to handle dependencies between python functions.'''
 
     def __init__(self, data_dir='./data'):
-        self.tasks = dict()
+        self.tasks = set()
         self.graph = nx.DiGraph()
         self._data_to_task = dict()
+        self._data_to_dep = dict()
         self._path_to_data = dict()
         self.data_dir = os.path.join(os.getcwd(), data_dir)
         if not os.path.isdir(self.data_dir):
             os.mkdir(self.data_dir)
+
+        self.verbose = False
 
     def get_or_register_data(self, raw_datafile):
         '''Get or create the Data object for a given filename'''
@@ -118,8 +123,25 @@ class TaskManager:
         else:
             raise NotRegisteredError('«%s» is not managed.' % data_obj)
 
+    def get_dep_by_data(self, data_obj):
+        if not isinstance(data_obj, Data):
+            raise TypeError('«%s» is not of type Data' % data_obj)
+
+        if data_obj in self._data_to_dep:
+            return self._data_to_dep[data_obj]
+        else:
+            raise NotRegisteredError('«%s» is mot managed.' % data_obj)
+
     def set_task_by_data(self, data_obj, task_obj):
         self._data_to_task[data_obj] = task_obj
+
+    def set_dep_by_data(self, data_obj, task_obj):
+        if data_obj in self._data_to_dep:
+            prev = self._data_to_dep[data_obj]
+        else:
+            self._data_to_dep[data_obj] = prev = set()
+
+        prev.add(task_obj)
 
     def get_data_by_path(self, fname):
         if fname in self._path_to_data:
@@ -132,6 +154,15 @@ class TaskManager:
             raise TypeError('«%s» is not of type Data' % data_obj)
 
         self._path_to_data[fname] = data_obj
+
+    def get_all_data(self):
+        '''Yields tuple of data file name, data file object'''
+        for fname in self._path_to_data:
+            yield fname, self.get_data_by_path(fname)
+
+    def get_all_tasks(self):
+        for task in self.tasks:
+            yield task
 
     def register(self, fun):
         '''Register a function in the task manager. The task manager
@@ -163,13 +194,20 @@ class TaskManager:
         fun_name = fun.__name__
 
         prefix = re.match('@(\w+)\.register', first_line).groups()[0]
-        print(prefix, src)
+        if tm.verbose:
+            print('Found function «%s» with prefix «%s»' % (fun_name, prefix))
+            if desc is not None:
+                pre = '\tdesc:'
+                print(pre, end='')
+                print(desc.replace('\n', '\n\t' + ' '*(len(pre)-2) + '|' + ' '))
+
         data_in = [self.get_or_register_data(dt)
                    for dt in set(re.findall(DIN_RE % prefix, src))]
         data_out = [self.get_or_register_data(dt)
                     for dt in set(re.findall(DOUT_RE % prefix, src))]
 
-        print(data_in, data_out)
+        if tm.verbose:
+            print('\tdata input: %s\n\tdata output:%s' % (data_in, data_out))
 
         def set_task(task):
             task.hash = hsh
@@ -179,6 +217,10 @@ class TaskManager:
             # Invalidate data provided
             for d in data_out:
                 self.set_task_by_data(d, task)
+            for d in data_in:
+                self.set_dep_by_data(d, task)
+
+            self.tasks.add(task)
 
         if fun_name in self.graph:
             task = self.graph.node[fun_name]['task']
@@ -215,7 +257,10 @@ class TaskManager:
             for node in node_order:
                 task_obj = self.graph.node[node]['task']
                 if task_obj.need_run or task_obj.name == task.name:
-                    print('Calling «%s»' % task_obj)
+                    if self.verbose:
+                        print('Calling «%s»' % task_obj)
+
+                    # Execute the task
                     ret = task_obj()
 
                     # Mark the children to run them
@@ -249,3 +294,90 @@ class TaskManager:
                         'files up to date' if task.outputs_up_to_date
                         else 'files not up to date'))
         return '\n'.join(arr)
+
+    def __getitem__(self, tname):
+        return [t for t in self.tasks if t.name in tname]
+
+    def get_task_by_name(self, tname):
+        return [t for t in self.tasks if t.name in tname]
+
+def auto_discover():
+    # tm = TaskManager(data_dir=os.path.join(cwd, 'data'))
+    from tests.test_1 import foo
+    return
+
+
+tm = TaskManager()
+
+
+def list_tasks(args):
+    auto_discover()
+    print('#Tasks\tUp-to-date')
+    for task in tm.get_all_tasks():
+        status = 'yes' if task.outputs_up_to_date else 'no'
+        print('%s\t%s' % (task.name,
+                          status))
+
+
+def list_files(args):
+    auto_discover()
+    print('#File\tProvider\tRequired by')
+    for f, dobj in tm.get_all_data():
+        manager = tm.get_task_by_data(dobj)
+        dependencies = tm.get_dep_by_data(dobj)
+        print('%s\t%s\t%s' % (f, manager,
+                              ';'.join([str(_) for _ in dependencies])))
+
+
+def generate(args):
+    auto_discover()
+    dobjs = (tm.get_data_by_path(d) for d in args.files)
+
+    for dobj in dobjs:
+        task = tm.get_task_by_data(dobj)
+        if args.verbose:
+            print('Running %s' % task)
+        if task.need_run:
+            task()
+
+
+def run(args):
+    tm.verbose = args.verbose
+    auto_discover()
+    for task in tm.get_task_by_name(args.tasks):
+        if task.need_run:
+            task()
+
+
+def parse_args():
+    import argparse
+    parser = argparse.ArgumentParser(description='')
+    parser.set_defaults(cb=lambda e: parser.print_help())
+    sp = parser.add_subparsers()
+
+    list_files_parser = sp.add_parser('list-files',
+                                      help='List the files managed.')
+    list_files_parser.add_argument('-v', '--verbose', action='store_true')
+    list_files_parser.set_defaults(cb=list_files)
+
+    list_tasks_parser = sp.add_parser('list-tasks',
+                                      help='List the tasks managed.')
+    list_tasks_parser.add_argument('-v', '--verbose', action='store_true')
+    list_tasks_parser.set_defaults(cb=list_tasks)
+
+    generate_parser = sp.add_parser('generate', help='Generate files.')
+    generate_parser.add_argument('files', nargs='+', help='Generate file.')
+    generate_parser.add_argument('-v', '--verbose', action='store_true')
+    generate_parser.set_defaults(cb=generate)
+
+    run_parser = sp.add_parser('run', help='Run a given task.')
+    run_parser.add_argument('tasks', nargs='+', help='Run task.')
+    run_parser.add_argument('-v', '--verbose', action='store_true')
+    run_parser.set_defaults(cb=run)
+
+    args = parser.parse_args()
+
+    args.cb(args)
+
+def main():
+    parse_args()
