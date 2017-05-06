@@ -25,7 +25,6 @@ class Task:
         self.desc = desc
         self.provides = provides
         self.requires = requires
-        self.has_run = True
         self.fun = dummyfun
         self.original_fun = dummyfun
 
@@ -103,7 +102,7 @@ class NotRegisteredError(Exception):
 class TaskManager:
     '''A class to handle dependencies between python functions.'''
 
-    def __init__(self, data_dir='./data'):
+    def __init__(self, data_dir='data'):
         self.tasks = set()
         self.graph = nx.DiGraph()
         self._data_to_task = dict()
@@ -205,7 +204,7 @@ class TaskManager:
         fun_name = fun.__name__
 
         prefix = re.match('@(\w+)\.register', first_line).groups()[0]
-        if tm.verbose:
+        if self.verbose:
             print('Found function «%s» with prefix «%s»' % (fun_name, prefix))
             if desc is not None:
                 pre = '\tdesc:'
@@ -217,10 +216,10 @@ class TaskManager:
         data_out = [self.get_or_register_data(dt)
                     for dt in set(re.findall(DOUT_RE % prefix, src))]
 
-        if tm.verbose:
+        if self.verbose:
             print('\tdata input: %s\n\tdata output:%s' % (data_in, data_out))
 
-        def set_task(task):
+        def set_task(task, has_run):
             task.hash = hsh
             task.src = src
             task.desc = desc
@@ -231,18 +230,20 @@ class TaskManager:
             for d in data_in:
                 self.set_dep_by_data(d, task)
 
+            self.has_run = has_run
             self.tasks.add(task)
 
         if fun_name in self.graph:
             task = self.graph.node[fun_name]['task']
             if task.hash != hsh:
                 print('W: overriding %s' % fun_name)
-                set_task(task)
+                set_task(task, has_run=False)
             else:
                 print('W: same redefinition of %s' % fun_name)
+                set_task(task, has_run=True)
         else:
             task = Task(fun_name, desc, requires=data_in, provides=data_out)
-            set_task(task)
+            set_task(task, has_run=False)
 
         # self.tasks[fun_name] = task
 
@@ -337,13 +338,6 @@ class TaskManager:
         nx.draw(g, pos=layout)
         nx.draw_networkx_labels(g, pos=layout)
         plt.savefig(fname)
-
-
-tm = TaskManager()
-
-
-def get_task_manager():
-    return tm
 
 
 def parse_args():
