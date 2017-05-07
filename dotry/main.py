@@ -35,6 +35,18 @@ class Task:
         return s
 
     @property
+    def state(self):
+        '''Return a dictionary objet that can be used to instantiate another
+        Task object with the same caracteristic (only missing the
+        fun/original_fun).
+        '''
+        return dict(name=self.name,
+                    desc=self.desc,
+                    creation_time=self.creation_time,
+                    call_time=self.call_time,
+                    hash=self.hash)
+
+    @property
     def outputs_up_to_date(self):
         '''True if all outputs are up-to-date with the inputs (does not check
         that the inputs file exist), which means they are younger.
@@ -113,6 +125,29 @@ class TaskManager:
             os.mkdir(self.data_dir)
 
         self.verbose = False
+        self.load_state()
+
+    def dump_state(self):
+        '''Basically dumps the hash of the files'''
+        state = {t.name: t.state for t in self.tasks}
+        path = os.path.join(DOTRY_PATH, STATE_FILE)
+
+        if not os.path.isdir(DOTRY_PATH):
+            os.mkdir(DOTRY_PATH)
+
+        with open(path, 'wb') as f:
+            pickle.dump(state, f)
+
+    def load_state(self):
+        path = os.path.join(DOTRY_PATH, STATE_FILE)
+        if os.path.isfile(path):
+            with open(path, 'br') as f:
+                state = pickle.load(f)
+
+            for k in state:
+                newTask = Task(**state[k])
+                self.tasks.add(newTask)
+                self.graph.add_node(newTask.name, task=newTask)
 
     def get_or_register_data(self, raw_datafile):
         '''Get or create the Data object for a given filename'''
@@ -378,4 +413,7 @@ def parse_args():
 def main():
     args = parse_args()
 
-    args.cb(args, tm)
+    try:
+        args.cb(args, tm)
+    finally:
+        tm.dump_state()
