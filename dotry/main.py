@@ -438,7 +438,7 @@ class TaskManager:
         return ret
 
     def print_as_dot(self, fname):
-        g = self.graph.reverse()
+        g = self.graph
 
         layout = nx.spring_layout(g)
         nx.draw(g, pos=layout)

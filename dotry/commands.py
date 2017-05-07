@@ -1,7 +1,24 @@
+import importlib
+import os
+from glob import glob
+
 
 def auto_discover():
-    # tm = TaskManager(data_dir=os.path.join(cwd, 'data'))
-    from tests.test_1 import foo
+    cwd = os.getcwd()
+
+    paths = os.path.join(cwd, '**', '*.py')
+
+    # Find all files
+    all_files = glob(paths)
+
+    for path in all_files:
+        # TODO: fails on Windows
+        path = os.path.relpath(path).replace('.py', '').split('/')
+        module = '.'.join(path)
+
+        # print('Importing module', module)
+        importlib.import_module(module)
+
     return
 
 
@@ -48,4 +65,5 @@ def dependency(args, tm):
     tm.verbose = args.verbose
     auto_discover()
 
+    print('calling print as dot method')
     tm.print_as_dot(args.output)
