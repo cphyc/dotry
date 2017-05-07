@@ -2,7 +2,7 @@ import inspect
 import hashlib
 import re
 import networkx as nx
-import time
+from datetime import datetime
 import os
 from functools import wraps
 import matplotlib as mpl
@@ -17,16 +17,25 @@ import matplotlib.pyplot as plt
 def dummyfun():
     raise Exception('Not specified')
 
+origin_time = datetime.fromtimestamp(0)
 
 class Task:
     '''Represent a task'''
-    def __init__(self, name, desc, provides, requires):
+    def __init__(self, name, desc=None,
+                 provides=[], requires=[], timestamp=None, **kwa):
         self.name = name
         self.desc = desc
         self.provides = provides
         self.requires = requires
         self.fun = dummyfun
         self.original_fun = dummyfun
+        self.creation_time = datetime.now()
+        self.call_time = origin_time
+        self.hash = None
+
+        for key in kwa:
+            if hasattr(self, key):
+                setattr(self, key, kwa[key])
 
     def __repr__(self):
         status = 'R' if self.has_run else ' '
@@ -49,18 +58,21 @@ class Task:
     @property
     def outputs_up_to_date(self):
         '''True if all outputs are up-to-date with the inputs (does not check
-        that the inputs file exist), which means they are younger.
-
+        that the inputs file exist), which means they have been generated
+        later than the inputs and after the last function call.
         '''
-        latest_input = max([inp.mtime
-                            for inp in self.requires if inp.exists],
-                           default=0)
+        latest_input = datetime.fromtimestamp(
+            max([inp.mtime
+                 for inp in self.requires if inp.exists],
+                default=0))
 
-        first_output = min([out.mtime
-                            for out in self.provides if out.exists],
-                           default=time.time())
+        first_output = datetime.fromtimestamp(
+            min([out.mtime
+                 for out in self.provides if out.exists],
+                default=self.call_time.timestamp()))
         flag = all((dt.exists for dt in self.provides))
-        flag = flag and (latest_input < first_output)
+        flag &= (latest_input <= self.call_time)
+        flag &= (self.call_time <= first_output)
         return flag
 
     @property
@@ -73,12 +85,25 @@ class Task:
         dont_need_run = self.has_run and self.outputs_up_to_date
         return not dont_need_run
 
-    def __call__(self, *args, **kwargs):
-        ret = self.fun(*args, **kwargs)
-        # Mark as runned and out file up to date
-        # print('setting %s.has_run = True' % self)
-        self.has_run = True
+    @property
+    def has_run(self):
+        return self.call_time > origin_time
+
+    def call_original_fun(self, *args, **kwargs):
+        # Important: set the call time *before* calling the function
+        self.call_time = datetime.now()
+        ret = self.original_fun(*args, **kwargs)
         return ret
+
+    def __call__(self, *args, **kwargs):
+        # Important: set the call time *before* calling the function
+        self.call_time = datetime.now()
+        ret = self.fun(*args, **kwargs)
+        return ret
+
+    def reset_time(self):
+        self.call_time = origin_time
+        self.creation_time = datetime.now()
 
 
 class Data:
@@ -254,31 +279,37 @@ class TaskManager:
         if self.verbose:
             print('\tdata input: %s\n\tdata output:%s' % (data_in, data_out))
 
-        def set_task(task, has_run):
+        def set_task(task):
             task.hash = hsh
             task.src = src
             task.desc = desc
             task.original_fun = fun
-            # Invalidate data provided
+
+            task.requires = data_in
+            task.provides = data_out
+
             for d in data_out:
                 self.set_task_by_data(d, task)
             for d in data_in:
                 self.set_dep_by_data(d, task)
 
-            self.has_run = has_run
             self.tasks.add(task)
 
         if fun_name in self.graph:
             task = self.graph.node[fun_name]['task']
             if task.hash != hsh:
-                print('W: overriding %s' % fun_name)
-                set_task(task, has_run=False)
+                if self.verbose:
+                    print('W: overriding %s' % fun_name)
+
+                set_task(task)
+                task.reset_time()
             else:
-                print('W: same redefinition of %s' % fun_name)
-                set_task(task, has_run=True)
+                if self.verbose:
+                    print('W: same redefinition of %s' % fun_name)
+                set_task(task)
         else:
             task = Task(fun_name, desc, requires=data_in, provides=data_out)
-            set_task(task, has_run=False)
+            set_task(task)
 
         # self.tasks[fun_name] = task
 
@@ -291,7 +322,6 @@ class TaskManager:
         for din in data_in:
             provider_task = self.get_task_by_data(din)
 
-            # print('Linking %s to %s' % (task.name, provider_task.name))
             self.graph.add_edge(provider_task.name, task.name)
 
         @wraps(fun)
@@ -315,20 +345,14 @@ class TaskManager:
                                            radius=100))
 
         node_order = nx.topological_sort(g, reverse=True)
-        print(g, node_order)
-        # print('order: ', node_order)
         for node in node_order:
             task_obj = self.graph.node[node]['task']
-            if task_obj.need_run or task_obj.name in [t.name for t in tasks]:
-                if self.verbose:
-                    print('Calling «%s»' % task_obj)
+            if task_obj.need_run:
+                # or task_obj.name in [t.name for t in tasks]:
+                print('Calling «%s»' % task_obj)
 
                 # Execute the task
-                ret = task_obj.original_fun()
-
-                # Mark the children to run them
-                for child in self.graph.neighbors(node):
-                    self.graph.node[child]['task'].has_run = False
+                ret = task_obj.call_original_fun()
 
         return ret
 
