@@ -6,7 +6,9 @@ def auto_discover():
 
 
 def list_tasks(args, tm):
+    tm.verbose = args.verbose
     auto_discover()
+
     print('#Tasks\tUp-to-date')
     for task in tm.get_all_tasks():
         status = 'yes' if task.outputs_up_to_date else 'no'
@@ -15,7 +17,9 @@ def list_tasks(args, tm):
 
 
 def list_files(args, tm):
+    tm.verbose = args.verbose
     auto_discover()
+
     print('#File\tProvider\tRequired by')
     for f, dobj in tm.get_all_data():
         manager = tm.get_task_by_data(dobj)
