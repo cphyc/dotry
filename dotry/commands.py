@@ -25,15 +25,13 @@ def list_files(args, tm):
 
 
 def generate(args, tm):
+    tm.verbose = args.verbose
     auto_discover()
     dobjs = (tm.get_data_by_path(d) for d in args.files)
 
-    for dobj in dobjs:
-        task = tm.get_task_by_data(dobj)
-        if args.verbose:
-            print('Running %s' % task)
-        if task.need_run:
-            task()
+    tasks = [tm.get_task_by_data(dobj) for dobj in dobjs]
+
+    tm.execute(tasks)
 
 
 def run(args, tm):
