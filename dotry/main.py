@@ -14,6 +14,53 @@ mpl.use('agg')
 import matplotlib.pyplot as plt
 
 
+STATE_FILE = 'state.pickle'
+
+
+def find_dotry_path():
+    def check_path(path):
+        dotrypath = os.path.join(path, '.dotry')
+        if os.path.isdir(dotrypath):
+            return dotrypath
+        else:
+            return None
+
+    path = os.getcwd()
+    dotrypath = check_path(path)
+    if dotrypath:
+        return dotrypath
+
+    while path != '/':
+        path, tail = os.path.split(path)
+        dotrypath = check_path(path)
+        if dotrypath:
+            return dotrypath
+
+    raise Exception('Could not find a dotry path.')
+
+
+DOTRY_PATH = find_dotry_path()
+TASK_MANAGER = None
+
+
+def load_state():
+    path = os.path.join(DOTRY_PATH, STATE_FILE)
+    with open(path, 'br') as f:
+        tm = pickle.load(f)
+
+    return tm
+
+
+def get_task_manager():
+    global TASK_MANAGER
+    if TASK_MANAGER is not None:
+        return TASK_MANAGER
+
+    TASK_MANAGER = TaskManager()
+
+    return TASK_MANAGER
+
+
 def dummyfun():
     raise Exception('Not specified')
 
@@ -436,6 +483,7 @@ def parse_args():
 
 def main():
     args = parse_args()
+    tm = get_task_manager()
 
     try:
         args.cb(args, tm)
