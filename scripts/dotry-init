@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+import os
+import sys
+from dotry.main import get_task_manager
+
+if __name__ == '__main__':
+    print('Creating dotry directory…')
+    if os.path.isdir('.dotry'):
+        print('\tThere is already a dotry installation here, aborting!')
+        sys.exit(1)
+    os.mkdir('.dotry')
+
+    print('Creating Readme file…')
+    if os.path.isfile('Readme.md'):
+        print('\tReadme.md already exists. Skipping')
+    os.mknod('Readme.md')
+
+    print('Auto discovering…')
+    tm = get_task_manager()
+    tm.dump_state()
