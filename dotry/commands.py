@@ -37,12 +37,32 @@ def list_files(args, tm):
     tm.verbose = args.verbose
     auto_discover()
 
-    print('#File\tProvider\tRequired by')
+    file_list = []
+    provider_list = []
+    dep_list = []
+
     for f, dobj in tm.get_all_data():
         manager = tm.get_task_by_data(dobj)
         dependencies = tm.get_dep_by_data(dobj)
-        print('%s\t%s\t%s' % (f, manager,
-                              ';'.join([str(_) for _ in dependencies])))
+        file_list.append(str(f))
+        provider_list.append(str(manager))
+        dep_list.append('; '.join([str(_) for _ in dependencies]))
+
+    def format_to_width(s, l):
+        spaces = l - len(s)
+        return s + ' '*spaces
+
+    maxwf = max((len(f) for f in file_list))
+    maxwp = max((len(f) for f in provider_list))
+
+    print('%s\t%s\t%s' % (format_to_width('# File', maxwf),
+                      format_to_width('Provider', maxwp),
+                      'Dependencies'))
+
+    for fs, ps, ds in zip(file_list, provider_list, dep_list):
+        print('%s\t%s\t%s' % (format_to_width(fs, maxwf),
+                          format_to_width(ps, maxwp),
+                          ds))
 
 
 def generate(args, tm):
